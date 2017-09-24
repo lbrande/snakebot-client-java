@@ -7,7 +7,9 @@ import static se.cygni.snake.api.model.SnakeDirection.UP;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.concurrent.ListenableFuture;
@@ -22,6 +24,7 @@ import se.cygni.snake.api.event.TournamentEndedEvent;
 import se.cygni.snake.api.exception.InvalidPlayerName;
 import se.cygni.snake.api.model.GameMode;
 import se.cygni.snake.api.model.GameSettings;
+import se.cygni.snake.api.model.Map;
 import se.cygni.snake.api.model.PlayerPoints;
 import se.cygni.snake.api.model.SnakeDirection;
 import se.cygni.snake.api.response.PlayerRegistered;
@@ -93,29 +96,37 @@ public class SimpleSnakePlayer extends BaseSnakeClient {
   public void onMapUpdate(MapUpdateEvent mapUpdateEvent) {
     ansiPrinter.printMap(mapUpdateEvent);
 
+    Map map = mapUpdateEvent.getMap();
+
     // MapUtil contains lot's of useful methods for querying the map!
-    MapUtil mapUtil = new MapUtil(mapUpdateEvent.getMap(), getPlayerId());
-    SnakeDirection[] directions = new SnakeDirection[3];
-    if (turnDirection == 1) {
-      directions[1] = nextDirection(currentDirection);
-      directions[2] = lastDirection(currentDirection);
-    } else {
-      directions[1] = lastDirection(currentDirection);
-      directions[2] = nextDirection(currentDirection);
-    }
-    directions[0] = currentDirection;
-    currentDirection =
-        Arrays.stream(directions)
-            .filter(mapUtil::canIMoveInDirection)
-            .sorted(
-                (first, second) ->
-                    Integer.compare(
-                        openMovesInDirection(mapUtil, second),
-                        openMovesInDirection(mapUtil, first)))
-            .findFirst()
-            .orElse(currentDirection);
-    if (currentDirection == directions[1]) {
-      turnDirection = -turnDirection;
+    MapUtil mapUtil = new MapUtil(map, getPlayerId());
+
+    if (!mapUtil.canIMoveInDirection(currentDirection)
+        || openMovesInDirection(mapUtil, currentDirection) < 2
+        || snakeHeadInDirection(map, mapUtil, currentDirection)) {
+      SnakeDirection preferredDirection;
+      SnakeDirection otherDirection;
+      if (turnDirection == 1) {
+        preferredDirection = nextDirection(currentDirection);
+        otherDirection = lastDirection(currentDirection);
+      } else {
+        preferredDirection = lastDirection(currentDirection);
+        otherDirection = nextDirection(currentDirection);
+      }
+      int preferredOpenMoves = openMovesInDirection(mapUtil, preferredDirection);
+      int otherOpenMoves = openMovesInDirection(mapUtil, otherDirection);
+      if ((preferredOpenMoves > 1 && !snakeHeadInDirection(map, mapUtil, preferredDirection))
+          || (otherOpenMoves > 1 && !snakeHeadInDirection(map, mapUtil, otherDirection))) {
+        if (mapUtil.canIMoveInDirection(preferredDirection)
+            && (!mapUtil.canIMoveInDirection(otherDirection)
+                || snakeHeadInDirection(map, mapUtil, otherDirection)
+                || preferredOpenMoves >= otherOpenMoves)) {
+          currentDirection = preferredDirection;
+          turnDirection = -turnDirection;
+        } else {
+          currentDirection = otherDirection;
+        }
+      }
     }
     registerMove(mapUpdateEvent.getGameTick(), currentDirection);
   }
@@ -151,6 +162,30 @@ public class SimpleSnakePlayer extends BaseSnakeClient {
                   return mapUtil.isTileAvailableForMovementTo(position);
                 })
             .count();
+  }
+
+  private boolean snakeHeadInDirection(Map map, MapUtil mapUtil, SnakeDirection direction) {
+    MapCoordinate nextPosition = translateInDirection(mapUtil.getMyPosition(), direction, 1);
+    ArrayList<SnakeDirection> directions = new ArrayList<>();
+    directions.add(lastDirection(direction));
+    directions.add(direction);
+    directions.add(nextDirection(direction));
+    return directions
+        .stream()
+        .anyMatch(
+            (SnakeDirection currentDirection) -> {
+              MapCoordinate position = translateInDirection(nextPosition, currentDirection, 1);
+              return otherSnakeHeads(map, mapUtil).contains(position);
+            });
+  }
+
+  private List<MapCoordinate> otherSnakeHeads(Map map, MapUtil mapUtil) {
+    return Arrays.stream(map.getSnakeInfos())
+        .filter(snakeInfo -> snakeInfo.isAlive() && !snakeInfo.getId().equals(getPlayerId()))
+        .map(
+            snakeInfo ->
+                mapUtil.translatePosition(snakeInfo.getPositions()[snakeInfo.getLength() - 1]))
+        .collect(Collectors.toList());
   }
 
   private SnakeDirection nextDirection(SnakeDirection direction) {
