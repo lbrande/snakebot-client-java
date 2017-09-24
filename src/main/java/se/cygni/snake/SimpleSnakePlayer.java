@@ -97,13 +97,13 @@ public class SimpleSnakePlayer extends BaseSnakeClient {
     MapUtil mapUtil = new MapUtil(mapUpdateEvent.getMap(), getPlayerId());
     SnakeDirection[] directions = new SnakeDirection[3];
     if (turnDirection == 1) {
-      directions[0] = nextDirection(currentDirection);
-      directions[1] = lastDirection(currentDirection);
-    } else {
-      directions[0] = lastDirection(currentDirection);
       directions[1] = nextDirection(currentDirection);
+      directions[2] = lastDirection(currentDirection);
+    } else {
+      directions[1] = lastDirection(currentDirection);
+      directions[2] = nextDirection(currentDirection);
     }
-    directions[2] = currentDirection;
+    directions[0] = currentDirection;
     currentDirection =
         Arrays.stream(directions)
             .filter(mapUtil::canIMoveInDirection)
@@ -114,6 +114,9 @@ public class SimpleSnakePlayer extends BaseSnakeClient {
                         openMovesInDirection(mapUtil, first)))
             .findFirst()
             .orElse(currentDirection);
+    if (currentDirection == directions[1]) {
+      turnDirection = -turnDirection;
+    }
     registerMove(mapUpdateEvent.getGameTick(), currentDirection);
   }
 
