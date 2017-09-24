@@ -7,7 +7,6 @@ import static se.cygni.snake.api.model.SnakeDirection.UP;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Random;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,6 +51,7 @@ public class SimpleSnakePlayer extends BaseSnakeClient {
 
   private Random random = new Random();
   private SnakeDirection currentDirection = SnakeDirection.values()[random.nextInt(4)];
+  private int turnDirection = -1;
 
   public static void main(String[] args) {
     SimpleSnakePlayer simpleSnakePlayer = new SimpleSnakePlayer();
@@ -68,22 +68,22 @@ public class SimpleSnakePlayer extends BaseSnakeClient {
   }
 
   /**
-   * The Snake client will continue to run ...
-   * : in TRAINING mode, until the single game ends.
-   * : in TOURNAMENT mode, until the server tells us its all over.
+   * The Snake client will continue to run ... : in TRAINING mode, until the single game ends. : in
+   * TOURNAMENT mode, until the server tells us its all over.
    */
   private static void startTheSnake(final SimpleSnakePlayer simpleSnakePlayer) {
-    Runnable task = () -> {
-      do {
-        try {
-          Thread.sleep(1000);
-        } catch (InterruptedException e) {
-          e.printStackTrace();
-        }
-      } while (simpleSnakePlayer.isPlaying());
+    Runnable task =
+        () -> {
+          do {
+            try {
+              Thread.sleep(1000);
+            } catch (InterruptedException e) {
+              e.printStackTrace();
+            }
+          } while (simpleSnakePlayer.isPlaying());
 
-      LOGGER.info("Shutting down");
-    };
+          LOGGER.info("Shutting down");
+        };
 
     Thread thread = new Thread(task);
     thread.start();
@@ -95,88 +95,90 @@ public class SimpleSnakePlayer extends BaseSnakeClient {
 
     // MapUtil contains lot's of useful methods for querying the map!
     MapUtil mapUtil = new MapUtil(mapUpdateEvent.getMap(), getPlayerId());
-
-    List<MapCoordinate> foodCoordinates = Arrays.asList(mapUtil.listCoordinatesContainingFood());
-    ArrayList<MapCoordinate> lastCoordinates = new ArrayList<>();
-    ArrayList<MapCoordinate> currentCoordinates = new ArrayList<>();
-    ArrayList<ArrayList<SnakeDirection>> currentPaths = new ArrayList<>();
-    ArrayList<SnakeDirection> correctPath = null;
-
-    if (!foodCoordinates.isEmpty()) {
-      currentCoordinates.add(mapUtil.getMyPosition());
-      currentPaths.add(new ArrayList<>());
-
-      pathLoop:
-      do {
-        ArrayList<MapCoordinate> newCoordinates = new ArrayList<>();
-        ArrayList<ArrayList<SnakeDirection>> newPaths = new ArrayList<>();
-        for (int i = 0; i < currentCoordinates.size(); i++) {
-          MapCoordinate top = currentCoordinates.get(i).translateBy(0, -1);
-          MapCoordinate bottom = currentCoordinates.get(i).translateBy(0, 1);
-          MapCoordinate left = currentCoordinates.get(i).translateBy(-1, 0);
-          MapCoordinate right = currentCoordinates.get(i).translateBy(1, 0);
-          if (!lastCoordinates.contains(top) && mapUtil.isTileAvailableForMovementTo(top)) {
-            newCoordinates.add(top);
-            ArrayList<SnakeDirection> path = new ArrayList<>(currentPaths.get(i));
-            path.add(UP);
-            if (foodCoordinates.contains(top)) {
-              correctPath = path;
-              break pathLoop;
-            }
-            newPaths.add(path);
-          }
-          if (!lastCoordinates.contains(bottom) && mapUtil.isTileAvailableForMovementTo(bottom)) {
-            newCoordinates.add(bottom);
-            ArrayList<SnakeDirection> path = new ArrayList<>(currentPaths.get(i));
-            path.add(DOWN);
-            if (foodCoordinates.contains(bottom)) {
-              correctPath = path;
-              break pathLoop;
-            }
-            newPaths.add(path);
-          }
-          if (!lastCoordinates.contains(left) && mapUtil.isTileAvailableForMovementTo(left)) {
-            newCoordinates.add(left);
-            ArrayList<SnakeDirection> path = new ArrayList<>(currentPaths.get(i));
-            path.add(LEFT);
-            if (foodCoordinates.contains(left)) {
-              correctPath = path;
-              break pathLoop;
-            }
-            newPaths.add(path);
-          }
-          if (!lastCoordinates.contains(right) && mapUtil.isTileAvailableForMovementTo(right)) {
-            newCoordinates.add(right);
-            ArrayList<SnakeDirection> path = new ArrayList<>(currentPaths.get(i));
-            path.add(RIGHT);
-            if (foodCoordinates.contains(right)) {
-              correctPath = path;
-              break pathLoop;
-            }
-            newPaths.add(path);
-          }
-        }
-        lastCoordinates = currentCoordinates;
-        currentCoordinates = newCoordinates;
-        currentPaths = newPaths;
-      } while (!currentCoordinates.isEmpty());
-    }
-
-    if (correctPath == null) {
-      if (!mapUtil.canIMoveInDirection(currentDirection)) {
-        SnakeDirection[] possibleDirections = Arrays.stream(SnakeDirection.values()).filter(mapUtil::canIMoveInDirection).toArray(SnakeDirection[]::new);
-        if (possibleDirections.length > 0) {
-          currentDirection = possibleDirections[random.nextInt(possibleDirections.length)];
-        } else {
-          currentDirection = SnakeDirection.values()[random.nextInt(4)];
-        }
-      }
+    SnakeDirection[] directions = new SnakeDirection[3];
+    if (turnDirection == 1) {
+      directions[0] = nextDirection(currentDirection);
+      directions[1] = lastDirection(currentDirection);
     } else {
-      currentDirection = correctPath.get(0);
+      directions[0] = lastDirection(currentDirection);
+      directions[1] = nextDirection(currentDirection);
     }
+    directions[2] = currentDirection;
+    currentDirection =
+        Arrays.stream(directions)
+            .filter(mapUtil::canIMoveInDirection)
+            .sorted(
+                (first, second) ->
+                    Integer.compare(
+                        openMovesInDirection(mapUtil, second),
+                        openMovesInDirection(mapUtil, first)))
+            .findFirst()
+            .orElse(currentDirection);
     registerMove(mapUpdateEvent.getGameTick(), currentDirection);
   }
 
+  private MapCoordinate translateInDirection(
+      MapCoordinate position, SnakeDirection direction, int steps) {
+    switch (direction) {
+      case LEFT:
+        return position.translateBy(-steps, 0);
+      case RIGHT:
+        return position.translateBy(steps, 0);
+      case UP:
+        return position.translateBy(0, -steps);
+      case DOWN:
+        return position.translateBy(0, steps);
+      default:
+    }
+    throw new NullPointerException();
+  }
+
+  private int openMovesInDirection(MapUtil mapUtil, SnakeDirection direction) {
+    MapCoordinate nextPosition = translateInDirection(mapUtil.getMyPosition(), direction, 1);
+    ArrayList<SnakeDirection> directions = new ArrayList<>();
+    directions.add(lastDirection(direction));
+    directions.add(direction);
+    directions.add(nextDirection(direction));
+    return (int)
+        directions
+            .stream()
+            .filter(
+                (SnakeDirection currentDirection) -> {
+                  MapCoordinate position = translateInDirection(nextPosition, currentDirection, 1);
+                  return mapUtil.isTileAvailableForMovementTo(position);
+                })
+            .count();
+  }
+
+  private SnakeDirection nextDirection(SnakeDirection direction) {
+    switch (direction) {
+      case LEFT:
+        return UP;
+      case RIGHT:
+        return DOWN;
+      case UP:
+        return RIGHT;
+      case DOWN:
+        return LEFT;
+      default:
+    }
+    throw new NullPointerException();
+  }
+
+  private SnakeDirection lastDirection(SnakeDirection direction) {
+    switch (direction) {
+      case LEFT:
+        return DOWN;
+      case RIGHT:
+        return UP;
+      case UP:
+        return LEFT;
+      case DOWN:
+        return RIGHT;
+      default:
+    }
+    throw new NullPointerException();
+  }
 
   @Override
   public void onInvalidPlayerName(InvalidPlayerName invalidPlayerName) {
@@ -185,9 +187,8 @@ public class SimpleSnakePlayer extends BaseSnakeClient {
 
   @Override
   public void onSnakeDead(SnakeDeadEvent snakeDeadEvent) {
-    LOGGER.info("A snake {} died by {}",
-        snakeDeadEvent.getPlayerId(),
-        snakeDeadEvent.getDeathReason());
+    LOGGER.info(
+        "A snake {} died by {}", snakeDeadEvent.getPlayerId(), snakeDeadEvent.getDeathReason());
   }
 
   @Override
@@ -217,7 +218,8 @@ public class SimpleSnakePlayer extends BaseSnakeClient {
 
   @Override
   public void onTournamentEnded(TournamentEndedEvent tournamentEndedEvent) {
-    LOGGER.info("Tournament has ended, winner playerId: {}", tournamentEndedEvent.getPlayerWinnerId());
+    LOGGER.info(
+        "Tournament has ended, winner playerId: {}", tournamentEndedEvent.getPlayerWinnerId());
     int c = 1;
     for (PlayerPoints pp : tournamentEndedEvent.getGameResult()) {
       LOGGER.info("{}. {} - {} points", c++, pp.getName(), pp.getPoints());
