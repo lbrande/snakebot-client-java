@@ -1,18 +1,9 @@
 package se.cygni.snake;
 
-import static se.cygni.snake.api.model.SnakeDirection.DOWN;
-import static se.cygni.snake.api.model.SnakeDirection.LEFT;
-import static se.cygni.snake.api.model.SnakeDirection.RIGHT;
-import static se.cygni.snake.api.model.SnakeDirection.UP;
-
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.concurrent.ListenableFuture;
@@ -35,7 +26,6 @@ import se.cygni.snake.api.util.GameSettingsUtils;
 import se.cygni.snake.client.AnsiPrinter;
 import se.cygni.snake.client.BaseSnakeClient;
 import se.cygni.snake.client.MapCoordinate;
-import se.cygni.snake.client.MapUtil;
 
 public class SimpleSnakePlayer extends BaseSnakeClient {
 
@@ -103,12 +93,12 @@ public class SimpleSnakePlayer extends BaseSnakeClient {
     Map map = mapUpdateEvent.getMap();
 
     // MapUtil contains lot's of useful methods for querying the map!
-    MapUtil mapUtil = new MapUtil(map, getPlayerId());
+    ExtendedMapUtil mapUtil = new ExtendedMapUtil(map, getPlayerId());
 
     SnakeDirection rightDirection =
-        turnLeft ? lastDirection(currentDirection) : nextDirection(currentDirection);
+        turnLeft ? mapUtil.lastDirection(currentDirection) : mapUtil.nextDirection(currentDirection);
     SnakeDirection wrongDirection =
-        turnLeft ? nextDirection(currentDirection) : lastDirection(currentDirection);
+        turnLeft ? mapUtil.nextDirection(currentDirection) : mapUtil.lastDirection(currentDirection);
 
     SnakeDirection[] directions =
         new SnakeDirection[] {currentDirection, rightDirection, wrongDirection};
@@ -116,46 +106,41 @@ public class SimpleSnakePlayer extends BaseSnakeClient {
     MapCoordinate center = new MapCoordinate(map.getWidth() / 2, map.getHeight() / 2);
 
     HashMap<SnakeDirection, List<MapCoordinate>> reachablePositions = new HashMap<>();
-    reachablePositions.put(
-        directions[0],
-        reachablePositions(
-            mapUtil, translateInDirection(mapUtil.getMyPosition(), directions[0], 1)));
+    reachablePositions.put(directions[0], mapUtil.reachablePositions(mapUtil.translateInDirection(mapUtil.getMyPosition(), directions[0], 1)));
     reachablePositions.put(
         directions[1],
         reachablePositions
-                .get(directions[0])
-                .contains(translateInDirection(mapUtil.getMyPosition(), directions[1], 1))
+            .get(directions[0])
+            .contains(mapUtil.translateInDirection(mapUtil.getMyPosition(), directions[1], 1))
             ? reachablePositions.get(directions[0])
-            : reachablePositions(
-                mapUtil, translateInDirection(mapUtil.getMyPosition(), directions[1], 1)));
+            : mapUtil.reachablePositions(mapUtil.translateInDirection(mapUtil.getMyPosition(), directions[1], 1)));
     reachablePositions.put(
         directions[2],
         reachablePositions
-                .get(directions[0])
-                .contains(translateInDirection(mapUtil.getMyPosition(), directions[2], 1))
+            .get(directions[0])
+            .contains(mapUtil.translateInDirection(mapUtil.getMyPosition(), directions[2], 1))
             ? reachablePositions.get(directions[0])
             : reachablePositions
-                    .get(directions[1])
-                    .contains(translateInDirection(mapUtil.getMyPosition(), directions[2], 1))
-                ? reachablePositions.get(directions[1])
-                : reachablePositions(
-                    mapUtil, translateInDirection(mapUtil.getMyPosition(), directions[2], 1)));
+            .get(directions[1])
+            .contains(mapUtil.translateInDirection(mapUtil.getMyPosition(), directions[2], 1))
+            ? reachablePositions.get(directions[1])
+            : mapUtil.reachablePositions(mapUtil.translateInDirection(mapUtil.getMyPosition(), directions[2], 1)));
 
-    sortDirectionsBy(
+    mapUtil.sortDirectionsBy(
         directions,
         Comparator.comparing(
             d ->
-                translateInDirection(mapUtil.getMyPosition(), d, 1)
+                mapUtil.translateInDirection(mapUtil.getMyPosition(), d, 1)
                     .getManhattanDistanceTo(center)));
-    sortDirectionsBy(
-        directions, Comparator.comparing(d -> openMovesInDirection(mapUtil, d) == 3 ? 0 : 1));
-    sortDirectionsBy(
+    mapUtil.sortDirectionsBy(
+        directions, Comparator.comparing(d -> mapUtil.openMovesInDirection(d) == 3 ? 0 : 1));
+    mapUtil.sortDirectionsBy(
         directions, Comparator.comparing(d -> -reachablePositions.get(d).size()));
-    sortDirectionsBy(
-        directions, Comparator.comparing(d -> snakeHeadsInDirection(map, mapUtil, d)));
-    sortDirectionsBy(
-        directions, Comparator.comparing(d -> openMovesInDirection(mapUtil, d) == 0 ? 1 : 0));
-    sortDirectionsBy(
+    mapUtil.sortDirectionsBy(
+        directions, Comparator.comparing(mapUtil::snakeHeadsInDirection));
+    mapUtil.sortDirectionsBy(
+        directions, Comparator.comparing(d -> mapUtil.openMovesInDirection(d) == 0 ? 1 : 0));
+    mapUtil.sortDirectionsBy(
         directions, Comparator.comparing(d -> mapUtil.canIMoveInDirection(d) ? 0 : 1));
 
     if (directions[0] == rightDirection) {
@@ -164,135 +149,6 @@ public class SimpleSnakePlayer extends BaseSnakeClient {
     currentDirection = directions[0];
     registerMove(mapUpdateEvent.getGameTick(), currentDirection);
     System.out.println(System.currentTimeMillis() - startTime);
-  }
-
-  private void sortDirectionsBy(SnakeDirection[] directions, Comparator<SnakeDirection> by) {
-    if (by.compare(directions[1], directions[2]) > 0) {
-      SnakeDirection temp = directions[1];
-      directions[1] = directions[2];
-      directions[2] = temp;
-    }
-    if (by.compare(directions[0], directions[1]) > 0) {
-      SnakeDirection temp = directions[0];
-      directions[0] = directions[1];
-      directions[1] = temp;
-    }
-    if (by.compare(directions[1], directions[2]) > 0) {
-      SnakeDirection temp = directions[1];
-      directions[1] = directions[2];
-      directions[2] = temp;
-    }
-  }
-
-  private MapCoordinate translateInDirection(
-      MapCoordinate position, SnakeDirection direction, int steps) {
-    switch (direction) {
-      case LEFT:
-        return position.translateBy(-steps, 0);
-      case RIGHT:
-        return position.translateBy(steps, 0);
-      case UP:
-        return position.translateBy(0, -steps);
-      case DOWN:
-        return position.translateBy(0, steps);
-      default:
-    }
-    throw new NullPointerException();
-  }
-
-  private int openMovesInDirection(MapUtil mapUtil, SnakeDirection direction) {
-    MapCoordinate nextPosition = translateInDirection(mapUtil.getMyPosition(), direction, 1);
-    ArrayList<SnakeDirection> directions = new ArrayList<>();
-    directions.add(lastDirection(direction));
-    directions.add(direction);
-    directions.add(nextDirection(direction));
-    return (int)
-        directions
-            .stream()
-            .filter(
-                (SnakeDirection currentDirection) -> {
-                  MapCoordinate position = translateInDirection(nextPosition, currentDirection, 1);
-                  return mapUtil.isTileAvailableForMovementTo(position);
-                })
-            .count();
-  }
-
-  private int snakeHeadsInDirection(Map map, MapUtil mapUtil, SnakeDirection direction) {
-    MapCoordinate nextPosition = translateInDirection(mapUtil.getMyPosition(), direction, 1);
-    ArrayList<SnakeDirection> directions = new ArrayList<>();
-    directions.add(lastDirection(direction));
-    directions.add(direction);
-    directions.add(nextDirection(direction));
-    return (int)
-        directions
-            .stream()
-            .filter(
-                (SnakeDirection currentDirection) -> {
-                  MapCoordinate position = translateInDirection(nextPosition, currentDirection, 1);
-                  return snakeHeads(map, mapUtil).contains(position);
-                })
-            .count();
-  }
-
-  private List<MapCoordinate> snakeHeads(Map map, MapUtil mapUtil) {
-    return Arrays.stream(map.getSnakeInfos())
-        .filter(snakeInfo -> snakeInfo.isAlive() && !snakeInfo.getId().equals(getPlayerId()))
-        .map(snakeInfo -> mapUtil.translatePosition(snakeInfo.getPositions()[0]))
-        .collect(Collectors.toList());
-  }
-
-  /*private List<MapCoordinate> snakeLasts(Map map, MapUtil mapUtil) {
-    return Arrays.stream(map.getSnakeInfos())
-        .filter(snakeInfo -> snakeInfo.isAlive() && !snakeInfo.getId().equals(getPlayerId()))
-        .map(
-            snakeInfo ->
-                mapUtil.translatePosition(snakeInfo.getPositions()[snakeInfo.getLength() - 1]))
-        .collect(Collectors.toList());
-  }*/
-
-  private List<MapCoordinate> reachablePositions(MapUtil mapUtil, MapCoordinate position) {
-    ArrayList<MapCoordinate> positions = new ArrayList<>();
-    positions.add(position);
-    for (int i = 0; i < positions.size(); i++) {
-      Stream.of(
-              positions.get(i).translateBy(-1, 0),
-              positions.get(i).translateBy(1, 0),
-              positions.get(i).translateBy(0, -1),
-              positions.get(i).translateBy(0, 1))
-          .filter(p -> !positions.contains(p) && mapUtil.isTileAvailableForMovementTo(p))
-          .forEach(positions::add);
-    }
-    return positions;
-  }
-
-  private SnakeDirection nextDirection(SnakeDirection direction) {
-    switch (direction) {
-      case LEFT:
-        return UP;
-      case RIGHT:
-        return DOWN;
-      case UP:
-        return RIGHT;
-      case DOWN:
-        return LEFT;
-      default:
-    }
-    throw new NullPointerException();
-  }
-
-  private SnakeDirection lastDirection(SnakeDirection direction) {
-    switch (direction) {
-      case LEFT:
-        return DOWN;
-      case RIGHT:
-        return UP;
-      case UP:
-        return LEFT;
-      case DOWN:
-        return RIGHT;
-      default:
-    }
-    throw new NullPointerException();
   }
 
   @Override
